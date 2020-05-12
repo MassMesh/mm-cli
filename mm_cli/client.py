@@ -36,18 +36,6 @@ def info():
     'fetch server information from given gateway public key'
     ()
 
-####################################################################
-# rpi3
-# 201:1dc6:90e4:1c1a:bba4:b5ba:82:1948
-# 6ac222cd81ef3446832b9aef2b0d2c8920ded440f68495a43544ecee99ad4045
-#
-# rpi4
-# 200:9687:30ef:13d:57b1:f7a7:b69f:72c4
-# 170b3b5642771016a9feecbece89283466c69d230c863812c4208d6af255b479
-####################################################################
-
-
-
 @arg('gateway_pub_key', help='public key of the gateway')
 @wrap_errors([socket.error, IOError])
 def renew(gateway_pub_key):
@@ -55,11 +43,6 @@ def renew(gateway_pub_key):
 
     ## getSelf: box_pub_key
     self_box_pub_key = util.Hemicarp().box_pub_key
-
-    ## Test against x1n
-    # mm cl renew cb29621f501e9de68aca856c1e90dba58406aa9f4918f845bc12c1c6756e1453
-    ## Test against selfdaemon
-    # mm cl renew 170b3b5642771016a9feecbece89283466c69d230c863812c4208d6af255b479
 
     ## Gateway: via input: box_pub_key
     gateway_addr = util.bpk_to_ipaddr(gateway_pub_key)

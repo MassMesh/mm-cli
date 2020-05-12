@@ -4,7 +4,6 @@ import socket
 import re
 import netaddr
 
-
 class Hemicarp:
   """
   Admin API accessible with tcp or unix socket
@@ -29,6 +28,9 @@ class Hemicarp:
 
   def addRoute(self, subnet, pubkey):
     return self.yggCaller(json.dumps({"request":"addremotesubnet", "subnet": subnet, "box_pub_key": pubkey}))
+
+  def getRoutes(self):
+    return self.yggCaller(json.dumps({"request":"getroutes"}))
 
   def removeRoute(self, subnet, pubkey):
     return self.yggCaller(json.dumps({"request":"removeremotesubnet", "subnet": subnet, "box_pub_key": pubkey}))
@@ -83,66 +85,68 @@ class Hemicarp:
   #<!-- end caller-->
 
 
+def get_wan_state_check(ip):
+    print('*D*', 'get_wan_state_check(' + str(ip) + ')')
+    try:
+        assert(netaddr.IPNetwork(ip))
+        return '%s' % netaddr.IPNetwork(ip)
+    except Exception as e:
+        print('*E*', 'error in get_wan_state_check(' + str(ip) + ')', str(e))
+        return False
+def clean_string(s):
+    try:
+        if type(s) == subprocess.CompletedProcess:
+            return str(s.stdout.decode("utf-8")).strip("\n").strip('"').strip()
+        elif type(s) == str:
+            return s.strip("\n").strip('"').strip()
+    except Exception as e:
+        print('error clean_string()', str(e))
+
+def get_cfg_peers():
+    # fixme: get this list dynamically from yggdrasil config (?)
+    return [
+        "108.175.10.127", "45.76.166.128", "198.58.100.240",
+        "45.77.107.150",  "50.236.201.218",
+    ]
+
 def client_provision():
 
-    ## Execs
-        # TODO: pass a verified ready-to-provision struct to this def
-    wan_gw = subprocess.run("ubus call network.interface.wan status | jq .route[0].nexthop", shell=True, capture_output=True)
-    gateway_pub_key = subprocess.run(["uci", "get", "system.gateway.key"], capture_output=True)
-    client_ip       = subprocess.run(["uci", "get", "system.gateway.cl_ip"], capture_output=True) # prefix
-    gateway_ip      = subprocess.run(["uci", "get", "system.gateway.gw_ip"], capture_output=True)
-
-
-    wan_gw = str(wan_gw.stdout.decode("utf-8")).strip("\n").strip('"')
-    gateway_pub_key = str(gateway_pub_key.stdout.decode("utf-8")).strip()
-    client_ip       = str(client_ip.stdout.decode("utf-8")).strip()
-    gateway_ip      = str(gateway_ip.stdout.decode("utf-8")).strip()
-
-    print('----- stephen reports bug here -----')
-    print('wan_gw', wan_gw)
-    print('gateway_pub_key', gateway_pub_key)
-    print('client_ip', client_ip)
-    print('gateway_ip', gateway_ip)
-    print('----- /stephen reports bug here (dupe wan_gw and gateway_ip) -----')
-    # default gw for all peers go on ygg0 dOh
-
     try:
-        assert(netaddr.IPAddress(wan_gw))
-        # for ipa in [ "50.236.201.218", "45.76.166.128", "45.77.107.150", "108.175.10.127", "198.58.100.240" ]:
-        #     addroute(ipa, wan_gw)
-    except:
-        # for ipa in [ "50.236.201.218", "45.76.166.128", "45.77.107.150", "108.175.10.127", "198.58.100.240" ]:
-        #     addroute(ipa, '127.0.0.1')
-        pass
 
+        ## Execs
+        wan_gw_ip = clean_string(subprocess.run("ubus call network.interface.wan status | jq .route[0].nexthop", shell=True, capture_output=True))
+        # validity through: get_wan_state_check(wan_gw_ip)
+        primary_wan_up = get_wan_state_check(wan_gw_ip)
+        print('*D*', 'primary_wan_up', bool(primary_wan_up))
 
-    try:
-        assert(bpk_to_ipaddr(gateway_pub_key))
+        client_ip  = clean_string(subprocess.run(["uci", "get", "system.gateway.cl_ip"], capture_output=True)) # prefix
         assert(netaddr.IPNetwork(client_ip))
+        addip(client_ip, "ygg0") # Add client_ip to ygg0 iface
+
+        gateway_ip = clean_string(subprocess.run(["uci", "get", "system.gateway.gw_ip"], capture_output=True))
         assert(netaddr.IPAddress(gateway_ip))
+
+        gateway_pub_key = clean_string(subprocess.run(["uci", "get", "system.gateway.key"], capture_output=True))
+        assert(bpk_to_ipaddr(gateway_pub_key))
+
     except Exception as e:
-        c = [ wan_gw, gateway_pub_key, client_ip, gateway_ip ]
-        print("Error in client_provision(wan_gw, gateway_pub_key, client_ip, gateway_ip)", c, 'err:', str(e))
-        return None
+        print("Error in client_provision()", str(e))
+        return False
 
-    wan_gw     = '%s' % netaddr.IPAddress(gateway_ip)
-    client_ip  = '%s' % netaddr.IPNetwork(client_ip)
-    gateway_ip = '%s' % netaddr.IPAddress(gateway_ip)
 
-    print('wan_gw', wan_gw)
-    print('gateway_pub_key', gateway_pub_key)
-    print('client_ip', client_ip)
-    print('gateway_ip', gateway_ip)
+    ## Routes
+    # Direct-Peers
+    for peer_ip in get_cfg_peers():
+        addroute(peer_ip, wan_gw_ip)
 
-    addip(client_ip, "ygg0") # Add gateway_ip to ygg iface
-    addremotesubnet("0.0.0.0/0", gateway_pub_key) # add remote subnet to ygg running config
-    addremotesubnet(gateway_ip, gateway_pub_key) # add remote subnet to ygg running config
+    # CKR: allow any traffic 0/0 into CKR via gw-pub-key
+    addremotesubnet("0.0.0.0/0", gateway_pub_key)
 
-    # fixme: get this list dynamically from yggdrasil config (?)
-    # for ipa in [ "50.236.201.218", "45.76.166.128", "45.77.107.150", "108.175.10.127", "198.58.100.240" ]:
-        # addroute(ipa, wan_gw)
+    # CKR: allow specific (/32) MeshWan Gateway IP to CKR
+    addremotesubnet(gateway_ip, gateway_pub_key)
 
-    setdefaultroute(gateway_ip) # set default route to gateway_ip
+    # Routing: Set the default route
+    setdefaultroute(gateway_ip)
 
 
 def bpk_to_ipaddr(box_pub_key=False):
@@ -161,38 +165,64 @@ def bpk_to_ipaddr(box_pub_key=False):
 
 def gateway_provision(**kwargs):
     print("fixme: gateway_provision")
-
-    # config rule
-    #   option dest_port '1617'
-    #   option src '*'
-    #   option name 'Network Daemon'
-    #   option family 'ipv6'
-    #   option target 'ACCEPT'
-    #   option proto 'tcp'
-    #   util.addip() # add gateway ip to ygg interface if not already set
-
-
+    # util.addip() # add gateway ip to ygg interface if not already set
     c = list(kwargs)
     print('gateway_provision(**kwargs)', c)
 
 def addroute(dest, gateway, iface=None):
-    assert(netaddr.IPNetwork(dest))
-    assert(netaddr.IPNetwork(gateway))
-    dest    = '%s' % netaddr.IPNetwork(dest).ip
-    gateway = '%s' % netaddr.IPNetwork(gateway).ip
+    try:
+        assert(netaddr.IPNetwork(dest))
 
-    c = ["ip", "route", "replace", dest, "via", gateway]
-    print('addroute()', c)
-    subprocess.run(c, shell=False, capture_output=True)
+        if gateway == 'null':
+            if dest == "0.0.0.0/0":
+                # default via 10.42.0.1 dev ygg0  metric 500
+                mesh_gw_ip = clean_string(subprocess.run(["uci", "get", "system.gateway.gw_ip"], capture_output=True))
+                print('*D*', 'primary wan: down, but added indirect defgw via mesh', mesh_gw_ip)
+                c = [ "ip", "route", "replace", dest, "via", mesh_gw_ip, "dev", "ygg0", "metric", "500" ]
+                p = subprocess.run(c, shell=False, capture_output=True)
+                assert(bool(p.returncode == 0))
+                return(bool(p.returncode == 0))
+            else:
+                # no gateway: null route to prevent direct-peering over CKR
+                print('*D*', 'adding null route', dest)
+                c = [ "ip", "route", "replace", "blackhole", dest, "metric", "500" ]
 
+                p = subprocess.run(c, shell=False, capture_output=True)
+                assert(bool(p.returncode == 0))
+                return(bool(p.returncode == 0))
+        else:
+            if dest == "0.0.0.0/0":
+                # not (yet) hit, using setdefaultroute()
+                pass
+            else:
+                assert(netaddr.IPNetwork(gateway))
+                print('*D*', 'primary wan: up, adding direct route', dest, 'via', gateway)
+                c = [ "ip", "route", "replace", dest, "via", gateway ]
+                p = subprocess.run(c, shell=False, capture_output=True)
+                assert(bool(p.returncode == 0))
+                return(bool(p.returncode == 0))
+    except Exception as e:
+        print('*E*', 'error in addroute()', str(e))
+        return False
 
 def setdefaultroute(gateway):
-    assert(netaddr.IPNetwork(gateway))
-    gateway = '%s' % netaddr.IPNetwork(gateway).ip
+    try:
+        assert(netaddr.IPNetwork(gateway))
+        gateway = '%s' % netaddr.IPNetwork(gateway).ip
 
-    c = ["ip", "route", "replace", "default", "via", gateway]
-    print('setdefaultroute()', c)
-    subprocess.run(c, shell=False, capture_output=False)
+        c = [ "ip", "route", "replace", "default", "via", gateway ]
+        print('*D*', 'setdefaultroute()', c)
+        subprocess.run(c, shell=False, capture_output=False)
+
+        mesh_gw_ip = clean_string(subprocess.run(["uci", "get", "system.gateway.gw_ip"], capture_output=True))
+        print('*D*', 'backup wan: adding secondary default gateway via mesh', mesh_gw_ip)
+
+        c = [ "ip", "route", "replace", "default", "via", mesh_gw_ip, "dev", "ygg0", "metric", "500" ]
+        p = subprocess.run(c, shell=False, capture_output=True)
+
+    except Exception as e:
+        print('*D*', 'error in setdefaultroute(' + str(gateway) + ')', str(e))
+        return False
 
 
 def deleteprefix(pfx, iface):
@@ -222,31 +252,63 @@ def deleteip(ip, iface):
 
 
 def addip(ip, iface):
-    assert(netaddr.IPNetwork(ip))
-    ip = '%s' % netaddr.IPNetwork(ip)
-    deleteip(ip, iface)
 
-    c = ["ip", "address", "add", ip, "dev", iface]
-    print('addip()', c)
-    subprocess.run(c, shell=False, capture_output=False)
+    try:
+        assert(netaddr.IPNetwork(ip))
+        ip = '%s' % netaddr.IPNetwork(ip)
 
+        c1 = [ "ip", "-o", "address", "show", "dev", "ygg0" ]
+        p1 = subprocess.Popen(c1, stdout=subprocess.PIPE)
+        c2 = [ "egrep", '-o', ".+:.+ygg0.+inet.+" + ip ]
+        p2 = subprocess.Popen(c2, stdin=p1.stdout, stdout=subprocess.PIPE)
+
+        p1.stdout.close()
+        p2.communicate()[0]
+        ygg_has_meshwan_ip=bool(p2.returncode == 0)
+
+        if ygg_has_meshwan_ip:
+            return True
+        else:
+            c = ["ip", "address", "add", ip, "dev", iface]
+            print('addip()', c)
+            cp = subprocess.run(c, shell=False, capture_output=False)
+            ygg_has_meshwan_ip=bool(cp.returncode == 0)
+            if ygg_has_meshwan_ip:
+                return True
+            else:
+                raise Exception('Failed to add ip to ygg0')
+                return False
+
+    except Exception as e:
+        print('Error in addip()', str(e))
+        return False
 
 def remremotesubnet(subnet, pubkey):
     assert(netaddr.IPNetwork(subnet))
     assert(bpk_to_ipaddr(pubkey))
     subnet = '%s' % netaddr.IPNetwork(subnet)
-
     c = Hemicarp().removeRoute(subnet, pubkey)
-    print('remremotesubnet()', c)
 
 
 def addremotesubnet(subnet, pubkey):
-    assert(netaddr.IPNetwork(subnet))
-    assert(bpk_to_ipaddr(pubkey))
-    subnet = '%s' % netaddr.IPNetwork(subnet)
-    remremotesubnet(subnet, pubkey)
+    try:
+        assert(netaddr.IPNetwork(subnet))
+        assert(bpk_to_ipaddr(pubkey))
 
-    c = Hemicarp().addRoute(subnet, pubkey)
-    print('addremotesubnet()', c)
+        subnet = '%s' % netaddr.IPNetwork(subnet)
+        c = Hemicarp().getRoutes()['response']['routes']
 
+        if subnet in c.keys():
+            print('*D*', 'subnet already routed', subnet)
+            if c[subnet] == pubkey:
+                print('*D*', 'subnet already routed by same subnet', c[subnet])
+            else:
+                print('*D*', 'replacing subnet routed by pubkey', c[subnet], 'via', pubkey)
+                remremotesubnet(subnet, c[subnet]) # routes["0.0.0.0/0"]: 56ebd7c92...
+                c = Hemicarp().addRoute(subnet, pubkey)
+        else:
+            c = Hemicarp().addRoute(subnet, pubkey)
+    except Exception as e:
+        print('Error in addremotesubnet()', str(e))
+        return False
 
