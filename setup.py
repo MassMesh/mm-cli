@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="mm-cli", # Replace with your own username
-    version="0.0.2",
+    version="0.0.3",
     author="Mass Mesh Technology Club",
     author_email="support@massmesh.org",
     description="A CLI application for connecting to the mesh. Written in Python.",

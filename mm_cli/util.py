@@ -125,7 +125,7 @@ def client_provision():
         print("Error in client_provision(wan_gw, gateway_pub_key, client_ip, gateway_ip)", c, 'err:', str(e))
         return None
 
-    wan_gw     = '%s' % netaddr.IPAddress(gateway_ip)
+    wan_gw     = '%s' % netaddr.IPAddress(wan_gw)
     client_ip  = '%s' % netaddr.IPNetwork(client_ip)
     gateway_ip = '%s' % netaddr.IPAddress(gateway_ip)
 
