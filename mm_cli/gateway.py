@@ -9,11 +9,9 @@ from . import util
 def addclient(client_pub_key, client_ip):
     'add a client ip reservation'
     print ('work in progress', util.Hemicarp)
-    print('addclient()', client_pub_key, client_ip)
     return util.bpk_to_ipaddr(client_pub_key)
     ## 3. Add IP/Network to yggdrasil interface
     addip(client_ip, "ygg0") # Add gateway_ip to ygg iface
-
     # ip addr add ${above_network_100.100.0.1/24} dev ygg0
 
     ## 4. Tell yggdrasil connectng peers IP/Network and PubKey
@@ -41,7 +39,7 @@ def server(foreground=False, killall=False):
             return
 
     if foreground:
-        start=subprocess.Popen(["/usr/local/bin/netdaemon.py"], shell=True)
+        start=subprocess.Popen(["/usr/bin/netdaemon.py"], shell=True)
         leforge = util.Hemicarp()
         print(leforge.nodeinfo)
         ## blocking
@@ -49,7 +47,7 @@ def server(foreground=False, killall=False):
 
 
     else:
-        start=subprocess.Popen(["/usr/local/bin/netdaemon.py"], shell=False)
+        start=subprocess.Popen(["/usr/bin/netdaemon.py"], shell=False)
         print("Starting gateway server...")
 
 
