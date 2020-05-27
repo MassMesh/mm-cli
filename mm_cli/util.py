@@ -133,7 +133,6 @@ def client_provision():
         print("Error in client_provision()", str(e))
         return False
 
-
     ## Routes
     # Direct-Peers
     for peer_ip in get_cfg_peers():
